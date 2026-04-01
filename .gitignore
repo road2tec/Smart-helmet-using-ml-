@@ -1,0 +1,34 @@
+# Dependency directories
+node_modules/
+backend/venv/
+.env
+__pycache__/
+*.pyc
+
+# Distribution / Build
+dist/
+build/
+*.exe
+*.dll
+*.so
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Private / Local files
+backend/models/*.pt
+backend/models/*.weights
+!backend/models/yolov8n.pt
+
+# User specific
+.gemini/
+.antigravity/
+tmp/
+*.log
