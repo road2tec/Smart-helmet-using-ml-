@@ -1,7 +1,9 @@
-from flask import Blueprint, jsonify, Response
+from flask import Blueprint, jsonify, Response, request
 import cv2
 import base64
 import numpy as np
+import datetime
+from utils.db import db
 
 # AI Modules
 from modules.helmet_detection import HelmetDetection
@@ -129,9 +131,11 @@ def get_status():
         if age_group == "<18":
             speed_limit = "Restricted (30km/h)"
         
-        return jsonify({
+        # Prepare data for storage/return
+        status_data = {
             'success': True,
             'camera_active': True,
+            'timestamp': datetime.datetime.utcnow().isoformat(),
             'helmet_status': {
                 'worn': helmet_worn,
                 'block_reason': "Please wear your helmet!" if not helmet_worn else ""
@@ -154,31 +158,43 @@ def get_status():
                 'blocked': start_blocked,
                 'reasons': block_reasons
             }
-        }), 200
+        }
+
+        # Persist to MongoDB (throttled to avoid bloat - save every ~5s)
+        # We use a simple time check or just save if camera is active
+        # To avoid spamming DB, we'll save every 10th request or so, or check time
+        current_time = time.time()
+        if not hasattr(get_status, 'last_save'):
+            get_status.last_save = 0
+            
+        if current_time - get_status.last_save > 5: # Save every 5 seconds
+            db.history.insert_one({
+                'helmet': helmet_worn,
+                'faces': status_data['rider_info']['age_results'],
+                'objects': objects_detected,
+                'status': 'OK' if helmet_worn and not is_drunk else 'WARNING',
+                'timestamp': datetime.datetime.utcnow()
+            })
+            get_status.last_save = current_time
+
+        return jsonify(status_data), 200
 
     except Exception as e:
         return jsonify({'message': f'Server Error: {str(e)}'}), 500
 
-@detection_bp.route('/helmet', methods=['GET'])
-def check_helmet():
-    success, frame = get_current_frame()
-    if success:
-        worn = helmet_detector.detect(frame)
-        return jsonify({'helmet_worn': worn})
-    return jsonify({'message': 'Camera error'}), 500
-
-@detection_bp.route('/age', methods=['GET'])
-def check_age():
-    success, frame = get_current_frame()
-    if success:
-        results = face_age_detector.detect_and_predict(frame)
-        return jsonify({'age_results': results})
-    return jsonify({'message': 'Camera error'}), 500
-
-@detection_bp.route('/drowsiness', methods=['GET'])
-def check_drowsiness():
-    success, frame = get_current_frame()
-    if success:
-        drowsy = drowsiness_detector.detect(frame)
-        return jsonify({'is_drowsy': drowsy})
-    return jsonify({'message': 'Camera error'}), 500
+@detection_bp.route('/history', methods=['GET'])
+def get_history():
+    """Fetch stored detection history from MongoDB."""
+    try:
+        # Get last 50 logs
+        logs = list(db.history.find().sort('timestamp', -1).limit(50))
+        
+        # Convert ObjectId and datetime to string for JSON serialization
+        for log in logs:
+            log['_id'] = str(log['_id'])
+            if 'timestamp' in log:
+                log['timestamp'] = log['timestamp'].isoformat()
+                
+        return jsonify({'success': True, 'logs': logs}), 200
+    except Exception as e:
+        return jsonify({'message': f'Error fetching history: {str(e)}'}), 500

@@ -22,6 +22,7 @@ export const authService = {
 
 export const detectionService = {
   getStatus: () => api.get('/detect/status'),
+  getHistory: () => api.get('/detect/history'),
 };
 
 export const alertService = {
