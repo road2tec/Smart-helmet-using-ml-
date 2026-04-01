@@ -38,13 +38,19 @@ class HelmetDetection:
         # YOLO Detection
         results = self.model(frame)
         
-        # Check if 'helmet' class is present in results (usually class 0 or 1 depending on model)
-        # Assuming model labels: 0: No Helmet, 1: Helmet
         for result in results:
             for box in result.boxes:
-                # result.names contains mapping of class indexes to names
                 class_id = int(box.cls[0])
-                label = result.names[class_id].lower()
-                if 'helmet' in label or 'hat' in label:
+                label = result.names[class_id]
+                
+                # Check for explicit No-Helmet class (model uses 'NO-Hardhat')
+                # If it's a negative class, we skip it
+                if 'NO-' in label.upper() or 'NO_' in label.upper():
+                    continue
+                
+                # If the label contains 'Hardhat', 'hat', or 'helmet', it IS a helmet.
+                label_lower = label.lower()
+                if 'hardhat' in label_lower or 'helmet' in label_lower or 'hat' in label_lower:
                     return True
+                    
         return False
