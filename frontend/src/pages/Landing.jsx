@@ -181,8 +181,59 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Neural Highway - Lifestyle Section */}
+      <section className="py-24 bg-white relative overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+          <div className="grid lg:grid-cols-2 gap-16 items-center">
+             <div className="space-y-8">
+                <div className="h-1.5 w-12 bg-primary-500 rounded-full mb-10"></div>
+                <h2 className="text-4xl md:text-6xl font-black font-outfit text-slate-950 tracking-tighter uppercase leading-[0.9]">
+                  THE <span className="text-primary-600">SMART</span> <br />
+                  RIDE EXPERIENCE.
+                </h2>
+                <p className="text-slate-500 text-xl font-medium leading-relaxed max-w-md">
+                   Beyond safety, we focus on the experience. A seamless digital layer that stays out of your way until it's needed.
+                </p>
+                <div className="flex flex-col space-y-6 pt-4">
+                   {[
+                      { title: 'Always Sync', desc: 'Continuous cloud-to-helmet encryption.' },
+                      { title: 'Zero Lag', desc: 'Edge processing for immediate response.' }
+                   ].map((item, i) => (
+                      <div key={i} className="flex items-start space-x-4">
+                         <div className="h-6 w-6 rounded-full bg-primary-500/10 flex items-center justify-center mt-1">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-primary-600" />
+                         </div>
+                         <div>
+                            <span className="block text-sm font-black text-slate-950 uppercase tracking-widest">{item.title}</span>
+                            <span className="text-slate-400 text-sm font-medium">{item.desc}</span>
+                         </div>
+                      </div>
+                   ))}
+                </div>
+             </div>
+             <motion.div 
+               initial={{ opacity: 0, x: 50 }}
+               whileInView={{ opacity: 1, x: 0 }}
+               viewport={{ once: true }}
+               className="relative"
+             >
+                <div className="rounded-[4rem] overflow-hidden border-8 border-slate-50 shadow-2xl relative group">
+                   <img src="/images/rider.png" alt="Rider Perception" className="w-full h-auto group-hover:rotate-1 group-hover:scale-105 transition-transform duration-700" />
+                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 to-transparent"></div>
+                   <div className="absolute bottom-10 left-10 flex items-center space-x-4">
+                      <div className="h-12 w-12 rounded-full bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center">
+                         <Activity className="h-6 w-6 text-white" />
+                      </div>
+                      <span className="text-sm font-black text-white uppercase tracking-widest">Biometric Flow: ACTIVE</span>
+                   </div>
+                </div>
+             </motion.div>
+          </div>
+        </div>
+      </section>
+
       {/* Feature Section */}
-      <section id="features" className="py-32 bg-white relative">
+      <section id="features" className="py-32 bg-slate-50 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <motion.div {...fadeInUp} className="text-center mb-24 max-w-3xl mx-auto">
              <div className="h-1.5 w-12 bg-primary-500 rounded-full mx-auto mb-10"></div>
