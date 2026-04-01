@@ -17,7 +17,11 @@ class Database:
         return self.db.users
 
     @property
-    def logs(self):
-        return self.db.logs
+    def history(self):
+        return self.db.history
+
+    @property
+    def alerts(self):
+        return self.db.alerts
 
 db = Database()

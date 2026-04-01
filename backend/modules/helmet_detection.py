@@ -35,22 +35,28 @@ class HelmetDetection:
             # This ensures the interlock is visible during testing but cleared when testing the "Happy Path".
             return True
         
-        # YOLO Detection
-        results = self.model(frame)
+        # YOLO Detection with original BGR frame
+        results = self.model(frame, verbose=False)
+        
+        found_hardhat = False
         
         for result in results:
             for box in result.boxes:
                 class_id = int(box.cls[0])
                 label = result.names[class_id]
+                conf = float(box.conf[0])
                 
-                # Check for explicit No-Helmet class (model uses 'NO-Hardhat')
-                # If it's a negative class, we skip it
+                # Debug logging
+                print(f"AI TRACE: Found {label} ({conf:.2f})")
+
+                # Block the negative cases
                 if 'NO-' in label.upper() or 'NO_' in label.upper():
                     continue
                 
-                # If the label contains 'Hardhat', 'hat', or 'helmet', it IS a helmet.
-                label_lower = label.lower()
-                if 'hardhat' in label_lower or 'helmet' in label_lower or 'hat' in label_lower:
-                    return True
+                # Check for Hardhat/Helmet/Hat specifically
+                lbl = label.lower()
+                if 'hardhat' in lbl or 'helmet' in lbl or 'hat' in lbl:
+                    if conf > 0.25: # Balanced threshold
+                        found_hardhat = True
                     
-        return False
+        return found_hardhat

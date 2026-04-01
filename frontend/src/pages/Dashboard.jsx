@@ -26,6 +26,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
+  const [authorized, setAuthorized] = useState(false);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -47,25 +49,39 @@ export default function Dashboard() {
         console.error(err);
       }
     };
+    if (authorized) return; // Stop polling once journey is locked
+    
     const interval = setInterval(fetchData, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [authorized]);
 
-  // Notification logic for helmet detection
+  // Notification and Auto-Stop logic for helmet detection (Instant)
   useEffect(() => {
-    if (data.helmet_detected && !lastHelmetState) {
+    if (data.helmet_detected && !lastHelmetState && !authorized) {
       setShowNotification(true);
-      setTimeout(() => setShowNotification(false), 5000);
+      setAuthorized(true);
+      
+      // Near-instant stop (1s for quick visual confirmation)
+      setTimeout(async () => {
+        setShowNotification(false);
+        try {
+           await detectionService.stopCamera();
+           setCameraActive(false);
+        } catch(e) {
+           console.error("Failed to stop camera:", e);
+        }
+      }, 800); 
     }
     setLastHelmetState(data.helmet_detected);
-  }, [data.helmet_detected, lastHelmetState]);
+  }, [data.helmet_detected, lastHelmetState, authorized]);
 
-  const isBlocked = !cameraActive || !data.helmet_detected || data.drowsy;
-  const blockReasons = !cameraActive 
+  // If authorized, it's unblocked forever.
+  const isBlocked = !authorized && (!cameraActive || !data.helmet_detected || data.drowsy);
+  const blockReasons = !cameraActive && !authorized
     ? ["CAMERA OFFLINE - PRESS START"] 
     : [
-        !data.helmet_detected && "NO HELMET DETECTED",
-        data.drowsy && "DROWSINESS DETECTED"
+        !data.helmet_detected && !authorized && "NO HELMET DETECTED",
+        data.drowsy && !authorized && "DROWSINESS DETECTED"
       ].filter(Boolean);
 
   return (
@@ -107,12 +123,12 @@ export default function Dashboard() {
           </div>
           
           {/* Main Status Badge */}
-          <div className={`px-8 py-3 rounded-2xl border flex items-center space-x-4 transition-all duration-500 ${!cameraActive ? 'bg-slate-500/10 border-slate-500/20 text-slate-500' : isBlocked ? 'bg-rose-500/10 border-rose-500/20 text-rose-500' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'}`}>
-             {!cameraActive ? <ShieldAlert className="h-5 w-5" /> : (isBlocked ? <ShieldAlert className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />)}
+          <div className={`px-8 py-3 rounded-2xl border flex items-center space-x-4 transition-all duration-500 ${!cameraActive && !authorized ? 'bg-slate-500/10 border-slate-500/20 text-slate-500' : isBlocked ? 'bg-rose-500/10 border-rose-500/20 text-rose-500' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'}`}>
+             {!cameraActive && !authorized ? <ShieldAlert className="h-5 w-5" /> : (isBlocked ? <ShieldAlert className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />)}
              <div className="flex flex-col">
                 <span className="text-[9px] font-black uppercase tracking-widest opacity-60 leading-none mb-1">Safety Status</span>
                 <span className="text-sm font-black font-outfit uppercase tracking-tighter">
-                   {!cameraActive ? 'STANDBY' : (isBlocked ? 'BLOCKED' : 'HELMET DETECTED - START')}
+                   {!cameraActive && !authorized ? 'STANDBY' : (isBlocked ? 'BLOCKED' : authorized ? 'JOURNEY AUTHORIZED' : 'HELMET DETECTED - VERIFYING')}
                 </span>
              </div>
           </div>
@@ -120,20 +136,20 @@ export default function Dashboard() {
           <div className="hidden lg:flex items-center space-x-12 px-8 py-2 bg-slate-950/30 rounded-2xl border border-white/5">
              <div className="flex flex-col items-end">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Helmet AI</span>
-                <span className={`text-xs font-bold uppercase tracking-tighter ${data.helmet_detected ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {data.helmet_detected ? 'ACTIVE' : 'OFFLINE'}
+                <span className={`text-xs font-bold uppercase tracking-tighter ${authorized ? 'text-primary-500' : data.helmet_detected ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {authorized ? 'LOCKED-IN' : data.helmet_detected ? 'ACTIVE' : 'OFFLINE'}
                 </span>
              </div>
              <div className="flex flex-col items-end">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Age AI</span>
-                <span className={`text-xs font-bold text-white uppercase tracking-tighter ${data.age_results.length > 0 ? 'text-primary-400' : 'text-slate-500'}`}>
-                  {data.age_results.length > 0 ? `${data.age_results.length} FACE` : 'SCANNING'}
+                <span className={`text-xs font-bold text-white uppercase tracking-tighter ${(data.age_results.length > 0 || authorized) ? 'text-primary-400' : 'text-slate-500'}`}>
+                  {authorized ? 'VERIFIED' : data.age_results.length > 0 ? `${data.age_results.length} FACE` : 'SCANNING'}
                 </span>
              </div>
              <div className="flex flex-col items-end">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Objects</span>
-                <span className={`text-xs font-bold uppercase tracking-tighter ${data.objects_detected.length > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
-                  {data.objects_detected.length > 0 ? `${data.objects_detected.length} OBJ` : 'CLEAR'}
+                <span className={`text-xs font-bold uppercase tracking-tighter ${authorized ? 'text-slate-500' : data.objects_detected.length > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
+                  {authorized ? 'DISCONNECTED' : data.objects_detected.length > 0 ? `${data.objects_detected.length} OBJ` : 'CLEAR'}
                 </span>
              </div>
           </div>
@@ -149,37 +165,53 @@ export default function Dashboard() {
                 animate={{ opacity: 1, scale: 1 }}
                 className="relative bg-slate-900 border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl group"
               >
-                {/* HUD Camera Scanning Line Overlay */}
-                <div className="absolute inset-0 bg-[linear-gradient(transparent_0%,rgba(59,130,246,0.05)_50%,transparent_100%)] bg-[length:100%_4px] animate-scan pointer-events-none"></div>
-                
-                <div className="aspect-video bg-black flex items-center justify-center relative overflow-hidden group/camera">
-                   <div className="absolute top-10 left-10 flex items-center space-x-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 z-20">
-                      <div className={`h-2 w-2 rounded-full ${cameraActive ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`}></div>
-                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Live Camera Feed</span>
-                   </div>
-                   
-                   {/* Corners Accents */}
-                   <div className="absolute top-8 right-8 w-12 h-12 border-t border-r border-primary-500/40 rounded-tr-xl z-20 pointer-events-none"></div>
-                   <div className="absolute bottom-8 left-8 w-12 h-12 border-b border-l border-primary-500/40 rounded-bl-xl z-20 pointer-events-none"></div>
-                   
-                   {!cameraActive ? (
-                      <div 
-                         onClick={() => setCameraActive(true)}
-                         className="flex flex-col items-center cursor-pointer group hover:scale-105 transition-all z-20"
-                      >
-                         <div className="h-24 w-24 rounded-full bg-slate-900 border border-white/10 flex items-center justify-center mb-6 group-hover:bg-primary-500/20 group-hover:border-primary-500/50 transition-all shadow-2xl">
-                            <Camera className="h-10 w-10 text-primary-500" />
-                         </div>
-                         <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white group-hover:text-primary-400 transition-colors">Start Camera</span>
-                      </div>
-                   ) : (
-                      <img 
-                         src="http://localhost:5000/detect/video_feed" 
-                         className="absolute inset-0 w-full h-full object-cover z-10" 
-                         alt="Camera Feed" 
-                      />
-                   )}
-                </div>
+                  {/* Decorative corner brackets */}
+                  <div className="absolute top-8 right-8 w-16 h-16 border-t-2 border-r-2 border-primary-500/30 rounded-tr-3xl"></div>
+                  <div className="absolute bottom-8 left-8 w-16 h-16 border-b-2 border-l-2 border-primary-500/30 rounded-bl-3xl"></div>
+
+                  {/* HUD Camera Scanning Line Overlay */}
+                  <div className="absolute inset-0 bg-[linear-gradient(transparent_0%,rgba(59,130,246,0.05)_50%,transparent_100%)] bg-[length:100%_4px] animate-scan pointer-events-none z-30"></div>
+                  
+                  <div className="w-full h-[600px] bg-black flex items-center justify-center relative overflow-hidden group/camera">
+                     <div className="absolute top-10 left-10 flex items-center space-x-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 z-30">
+                        <div className={`h-2 w-2 rounded-full ${cameraActive ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`}></div>
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Live Camera Feed</span>
+                     </div>
+                     
+                     {cameraActive ? (
+                        <img 
+                           src="http://localhost:5000/detect/video_feed" 
+                           className="w-full h-full object-cover z-10" 
+                           alt="Camera Feed" 
+                        />
+                     ) : authorized ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center space-y-8 bg-slate-950 z-20">
+                           <motion.div
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                              className="h-32 w-32 rounded-full bg-emerald-500/10 border-4 border-emerald-500/30 flex items-center justify-center relative shadow-[0_0_50px_rgba(16,185,129,0.2)]"
+                           >
+                              <ShieldCheck className="h-16 w-16 text-emerald-500" />
+                              <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-ping"></div>
+                           </motion.div>
+                           <div className="text-center space-y-2">
+                              <h3 className="text-4xl font-black font-outfit uppercase tracking-tighter text-emerald-400 leading-none">SmartCore Authorized</h3>
+                              <p className="text-slate-500 font-bold uppercase tracking-widest text-[11px]">Hardware link established. Camera securely offline.</p>
+                           </div>
+                        </div>
+                     ) : (
+                        <div 
+                           onClick={() => setCameraActive(true)}
+                           className="flex flex-col items-center justify-center cursor-pointer group hover:scale-105 transition-all z-20 w-full h-full bg-slate-950"
+                        >
+                           <div className="h-24 w-24 rounded-full bg-slate-900 border border-white/10 flex items-center justify-center mb-6 group-hover:bg-primary-500/20 group-hover:border-primary-500/50 transition-all shadow-2xl">
+                              <Camera className="h-10 w-10 text-primary-500" />
+                           </div>
+                           <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white group-hover:text-primary-400 transition-colors">Initialize Feed</span>
+                        </div>
+                     )}
+                  </div>
 
                 {/* Feed Info Bar */}
                 <div className="p-6 bg-slate-900/60 flex items-center justify-between border-t border-white/5">

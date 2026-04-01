@@ -15,14 +15,14 @@ export default function Archives() {
         const res = await detectionService.getHistory();
         if (res.data.success) {
           const formattedLogs = res.data.logs.map((log, idx) => ({
-            id: `LOG-${log._id.slice(-4).toUpperCase()}`,
-            time: new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            date: new Date(log.timestamp).toLocaleDateString(),
-            helmet: log.helmet,
-            faces: log.faces.map(f => `${f.age} (${f.age_group})`),
-            objects: (log.objects || []).map(o => typeof o === 'string' ? o : o.label),
+            id: `LOG-${(log._id || '').slice(-4).toUpperCase()}`,
+            time: log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'N/A',
+            date: log.timestamp ? new Date(log.timestamp).toLocaleDateString() : 'N/A',
+            helmet: !!log.helmet,
+            faces: (log.faces || []).map(f => `${f.age || '?' } (${f.age_group || 'N/A'})`),
+            objects: (log.objects || []).map(o => typeof o === 'string' ? o : (o.label || 'Unknown')),
             status: log.status || 'OK',
-            raw_timestamp: new Date(log.timestamp).getTime()
+            raw_timestamp: log.timestamp ? new Date(log.timestamp).getTime() : 0
           }));
           setLogs(formattedLogs);
         }

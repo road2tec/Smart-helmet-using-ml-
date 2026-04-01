@@ -57,6 +57,14 @@ def start_camera_if_needed():
         thread = threading.Thread(target=capture_thread, daemon=True)
         thread.start()
 
+@detection_bp.route('/stop', methods=['POST'])
+def stop_camera():
+    global camera_active, global_frame
+    camera_active = False
+    with frame_lock:
+        global_frame = None
+    return jsonify({'success': True, 'message': 'Camera securely terminated.'}), 200
+
 def get_current_frame():
     with frame_lock:
         if global_frame is not None:
@@ -64,8 +72,8 @@ def get_current_frame():
         return False, None
 
 def generate_frames():
-    start_camera_if_needed() # Triggers the camera hardware ON
-    while True:
+    start_camera_if_needed()
+    while camera_active:
         success, frame = get_current_frame()
         if not success:
             time.sleep(0.1)
@@ -173,7 +181,7 @@ def get_status():
                 'faces': status_data['rider_info']['age_results'],
                 'objects': objects_detected,
                 'status': 'OK' if helmet_worn and not is_drunk else 'WARNING',
-                'timestamp': datetime.datetime.utcnow()
+                'timestamp': datetime.datetime.now(datetime.timezone.utc) # Aware datetime
             })
             get_status.last_save = current_time
 
@@ -193,7 +201,12 @@ def get_history():
         for log in logs:
             log['_id'] = str(log['_id'])
             if 'timestamp' in log:
-                log['timestamp'] = log['timestamp'].isoformat()
+                # Add Z suffix if not present to ensure browser detects UTC
+                ts = log['timestamp']
+                if ts.tzinfo is None:
+                    log['timestamp'] = ts.isoformat() + "Z"
+                else:
+                    log['timestamp'] = ts.isoformat()
                 
         return jsonify({'success': True, 'logs': logs}), 200
     except Exception as e:
