@@ -7,7 +7,9 @@ SMARTCORE is a high-performance, real-time safety monitoring system for motorcyc
 ## ⚡ Main Features
 
 - **🧠 Neural Safety Vision**: Real-time YOLOv8 integration to detect helmets, persons, and surrounding vehicles with 99.8% precision.
-- **🧔 Biometric Layer**: Automatic facial detection and age-group estimation (18+, 25+, etc.) using OpenCV DNN.
+- **🧔 Biometric Layer**: OpenCV DNN face detection + binary age classification (**Above 18 / Below 18**).
+- **😴 Driver Vigilance AI**: Real-time EAR-based eye blinking and drowsiness detection using MediaPipe landmarks, with audible alert.
+- **🚦 Unified Safety Pipeline**: One live webcam pipeline that runs age, drowsiness, and road object detection together with threaded capture and async inference.
 - **🛡️ Hardware Interlock (Mocked)**: logic for MQ-3 (Alcohol) and MPU-6050 (Impact) sensors to lock engine starting if safety protocols are breached.
 - **📊 Tactical Dashboard**: Futuristic React.js interface with live telemetry, session history, and AI perception monitoring.
 - **🔔 Real-time Alerts**: Instant notifications for missing safety gear (Helmets/Hat) and drowsiness detection.
@@ -49,12 +51,47 @@ SMARTCORE is a high-performance, real-time safety monitoring system for motorcyc
    python app.py
    ```
 
-3. **Frontend Setup:**
+3. **Run Unified Smart Driver Pipeline (Webcam Window):**
+   ```bash
+   cd backend
+   python main.py
+   ```
+
+   Optional camera index:
+   ```bash
+   python main.py --camera 1
+   ```
+
+4. **Frontend Setup:**
    ```bash
    cd ../frontend
    npm install
    npm run dev
    ```
+
+---
+
+## 🧩 New Backend Modules (Unified AI)
+
+```text
+backend/modules/
+├── age_detection.py          # OpenCV DNN face + binary age classification
+├── drowsiness_detection.py   # EAR logic + drowsiness alert beep
+├── object_detection.py       # YOLOv8 road safety objects (+ speed-breaker heuristic)
+├── face_age.py               # Backward-compatible wrapper for existing Flask routes
+└── drowsiness.py             # Backward-compatible wrapper for existing Flask routes
+
+backend/main.py               # Unified threaded real-time integration pipeline
+```
+
+---
+
+## ✅ Notes for First Run
+
+- The age model files are auto-downloaded to `backend/models/age_dnn` on first run.
+- YOLO uses `backend/yolov8n.pt` if available, otherwise Ultralytics default loading is used.
+- Press `Q` in the webcam window to stop the pipeline.
+- If webcam fails to open, try another index using `--camera`.
 
 ---
 

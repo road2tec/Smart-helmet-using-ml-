@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ShieldCheck, ShieldAlert, Zap, Activity, Battery, User, 
@@ -11,6 +11,8 @@ import { detectionService } from '../services/api';
 
 export default function Dashboard() {
   const [cameraActive, setCameraActive] = useState(false);
+  const [feedError, setFeedError] = useState('');
+  const [frameTick, setFrameTick] = useState(Date.now());
   const [data, setData] = useState({
     helmet_detected: false,
     drowsy: false,
@@ -19,14 +21,67 @@ export default function Dashboard() {
     age_group: 'N/A',
     age_results: [],
     objects_detected: [],
+    drowsiness_debug: { ear: 0, eyes_closed_duration: 0, eyes_detected: 0 },
+    camera_error: '',
+    camera_index: null,
     location: { lat: 0, lng: 0 }
   });
   const [showNotification, setShowNotification] = useState(false);
+  const [showDrowsyPopup, setShowDrowsyPopup] = useState(false);
   const [lastHelmetState, setLastHelmetState] = useState(false);
   const [loading, setLoading] = useState(true);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   const [authorized, setAuthorized] = useState(false);
+  const audioCtxRef = useRef(null);
+
+  const unlockAudio = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioCtx();
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume();
+      }
+    } catch (error) {
+      console.warn('Audio unlock failed:', error);
+    }
+  };
+
+  const playDrowsyBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioCtx();
+      }
+
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(1600, ctx.currentTime);
+
+      gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.24);
+    } catch (error) {
+      console.warn('Drowsiness beep failed:', error);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,6 +98,9 @@ export default function Dashboard() {
           age_group: res.rider_info?.age_group || 'N/A',
           age_results: res.rider_info?.age_results || [],
           objects_detected: res.safety_status?.objects || [],
+          drowsiness_debug: res.safety_status?.drowsiness_debug || { ear: 0, eyes_closed_duration: 0, eyes_detected: 0 },
+          camera_error: res.camera_error || '',
+          camera_index: res.camera_index ?? null,
         }));
         setLoading(false);
       } catch (err) {
@@ -51,9 +109,57 @@ export default function Dashboard() {
     };
     if (authorized) return; // Stop polling once journey is locked
     
-    const interval = setInterval(fetchData, 2000);
+    const interval = setInterval(fetchData, 900);
     return () => clearInterval(interval);
   }, [authorized]);
+
+  useEffect(() => {
+    if (!cameraActive || authorized || !data.drowsy) return;
+
+    playDrowsyBeep();
+    const id = setInterval(() => {
+      playDrowsyBeep();
+    }, 1300);
+
+    return () => clearInterval(id);
+  }, [cameraActive, authorized, data.drowsy]);
+
+  useEffect(() => {
+    if (!cameraActive || authorized) {
+      setShowDrowsyPopup(false);
+      return;
+    }
+
+    if (!data.drowsy) {
+      setShowDrowsyPopup(false);
+      return;
+    }
+
+    setShowDrowsyPopup(true);
+    const popupTimer = setTimeout(() => {
+      setShowDrowsyPopup(false);
+    }, 2600);
+
+    return () => clearTimeout(popupTimer);
+  }, [cameraActive, authorized, data.drowsy]);
+
+  useEffect(() => {
+    return () => {
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cameraActive) return;
+
+    const id = setInterval(() => {
+      setFrameTick(Date.now());
+    }, 200);
+
+    return () => clearInterval(id);
+  }, [cameraActive]);
 
   // Notification and Auto-Stop logic for helmet detection (Instant)
   useEffect(() => {
@@ -179,11 +285,21 @@ export default function Dashboard() {
                      </div>
                      
                      {cameraActive ? (
-                        <img 
-                           src="http://localhost:5000/detect/video_feed" 
-                           className="w-full h-full object-cover z-10" 
-                           alt="Camera Feed" 
+                      <>
+                          <img 
+                            src={`http://localhost:5000/detect/frame.jpg?t=${frameTick}`}
+                          className="w-full h-full object-cover z-10" 
+                          alt="Camera Feed" 
+                          onError={() => setFeedError('Unable to load camera stream from backend.')}
+                          onLoad={() => setFeedError('')}
                         />
+                        {(data.camera_error || feedError) && (
+                         <div className="absolute bottom-4 left-4 right-4 z-40 rounded-2xl border border-rose-500/20 bg-slate-950/80 backdrop-blur-md px-4 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-rose-400">
+                          {feedError || data.camera_error}
+                          {data.camera_index !== null ? ` (index ${data.camera_index})` : ''}
+                         </div>
+                        )}
+                      </>
                      ) : authorized ? (
                         <div className="w-full h-full flex flex-col items-center justify-center space-y-8 bg-slate-950 z-20">
                            <motion.div
@@ -202,13 +318,21 @@ export default function Dashboard() {
                         </div>
                      ) : (
                         <div 
-                           onClick={() => setCameraActive(true)}
+                          onClick={() => {
+                            unlockAudio();
+                            setCameraActive(true);
+                          }}
                            className="flex flex-col items-center justify-center cursor-pointer group hover:scale-105 transition-all z-20 w-full h-full bg-slate-950"
                         >
                            <div className="h-24 w-24 rounded-full bg-slate-900 border border-white/10 flex items-center justify-center mb-6 group-hover:bg-primary-500/20 group-hover:border-primary-500/50 transition-all shadow-2xl">
                               <Camera className="h-10 w-10 text-primary-500" />
                            </div>
                            <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white group-hover:text-primary-400 transition-colors">Initialize Feed</span>
+                           {(data.camera_error || data.camera_index !== null) && (
+                             <span className="mt-4 max-w-[80%] text-center text-[10px] font-black uppercase tracking-[0.2em] text-rose-400/90">
+                               {data.camera_error || 'Camera detected'}{data.camera_index !== null ? ` (index ${data.camera_index})` : ''}
+                             </span>
+                           )}
                         </div>
                      )}
                   </div>
@@ -376,6 +500,27 @@ export default function Dashboard() {
                           {data.age_group === 'N/A' ? '—' : data.age_group}
                         </span>
                      </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Drowsiness</span>
+                      <span className={`text-xs font-bold tracking-widest ${data.drowsy ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        {data.drowsy ? 'ALERT' : 'NORMAL'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Eyes Seen</span>
+                      <span className="text-xs font-bold tracking-widest text-slate-300">
+                        {data.drowsiness_debug?.eyes_detected ?? 0}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Closed Time</span>
+                      <span className="text-xs font-bold tracking-widest text-slate-300">
+                        {Number(data.drowsiness_debug?.eyes_closed_duration || 0).toFixed(1)}s
+                      </span>
+                    </div>
                   </div>
                </motion.div>
             </div>
@@ -397,6 +542,26 @@ export default function Dashboard() {
               <div className="flex flex-col">
                  <span className="text-[10px] font-black uppercase tracking-widest opacity-80 leading-none mb-1">Authorization Success</span>
                  <span className="text-lg font-black font-outfit uppercase tracking-tighter">Helmet Detected - Ready to Start</span>
+              </div>
+            </motion.div>
+          )}
+
+          {showDrowsyPopup && (
+            <motion.div
+              initial={{ opacity: 0, y: 30, scale: 0.94 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 30, scale: 0.94 }}
+              className="fixed top-8 right-8 z-[110] bg-rose-600 text-white px-7 py-5 rounded-2xl shadow-[0_20px_50px_rgba(244,63,94,0.45)] flex items-start space-x-4 border border-rose-300/30 backdrop-blur-xl"
+            >
+              <div className="h-10 w-10 bg-white/20 rounded-xl flex items-center justify-center">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase tracking-widest opacity-80 leading-none mb-1">Critical Alert</span>
+                <span className="text-lg font-black font-outfit uppercase tracking-tighter leading-none">Drowsiness Detected</span>
+                <span className="mt-2 text-xs font-bold uppercase tracking-widest text-rose-100/90">
+                  Eyes closed for {Number(data.drowsiness_debug?.eyes_closed_duration || 0).toFixed(1)}s
+                </span>
               </div>
             </motion.div>
           )}
