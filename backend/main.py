@@ -8,9 +8,13 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from hardware.accident_detection import AccidentDetector
 from modules.age_detection import AgeDetector
 from modules.drowsiness_detection import DrowsinessDetector
 from modules.object_detection import ObjectDetection
+from utils.config import Config
+from utils.email_alert import send_accident_alert_email
+from utils.location_service import get_laptop_location
 
 
 class ThreadedCamera:
@@ -53,6 +57,14 @@ class ThreadedCamera:
         self.thread.start()
 
     def _open_camera(self) -> cv2.VideoCapture:
+        def is_usable_frame(frame: Optional[np.ndarray]) -> bool:
+            if frame is None or frame.size == 0:
+                return False
+            # Reject dead/virtual camera feeds that only output black frames.
+            if float(frame.mean()) <= 1.0 and float(frame.std()) <= 1.0:
+                return False
+            return True
+
         backend_entries = []
         if hasattr(cv2, "CAP_DSHOW"):
             backend_entries.append(("DSHOW", cv2.CAP_DSHOW))
@@ -75,7 +87,7 @@ class ThreadedCamera:
                 first_frame_ok = False
                 for _ in range(30):
                     ok, frame = cap.read()
-                    if ok and frame is not None and frame.size > 0:
+                    if ok and is_usable_frame(frame):
                         first_frame_ok = True
                         break
                     time.sleep(0.04)
@@ -142,6 +154,9 @@ class SmartDriverSafetyPipeline:
         self.age_detector: Optional[AgeDetector] = None
         self.drowsiness_detector: Optional[DrowsinessDetector] = None
         self.object_detector: Optional[ObjectDetection] = None
+        self.accident_detector = AccidentDetector(
+            cooldown_sec=Config.ACCIDENT_ALERT_COOLDOWN_SEC
+        )
 
         self._init_modules()
 
@@ -162,6 +177,13 @@ class SmartDriverSafetyPipeline:
             "alert_text": "",
             "left_eye_points": [],
             "right_eye_points": [],
+        }
+        self.latest_accident: Dict = {
+            "detected": False,
+            "email_sent": False,
+            "email_error": "",
+            "location": None,
+            "motion_score": 0.0,
         }
 
     def _init_modules(self) -> None:
@@ -230,6 +252,43 @@ class SmartDriverSafetyPipeline:
             self.object_future = self.executor.submit(self.object_detector.detect, frame_for_obj)
             self.last_object_submit = now
 
+    def _scene_has_activity(self) -> bool:
+        # Restrict accident checks to plausible road activity frames to reduce false positives.
+        active_labels = {"person", "motorcycle", "bicycle", "car", "bus", "truck"}
+        for det in self.latest_object_results:
+            label = str(det.get("label", "")).lower()
+            if label in active_labels:
+                return True
+        return len(self.latest_age_results) > 0
+
+    def _handle_accident_detection(self, frame: np.ndarray) -> None:
+        accident_detected = self.accident_detector.detect_accident(
+            frame=frame,
+            scene_active=self._scene_has_activity(),
+        )
+
+        self.latest_accident = {
+            "detected": accident_detected,
+            "email_sent": False,
+            "email_error": "",
+            "location": None,
+            "motion_score": self.accident_detector.get_last_motion_score(),
+        }
+
+        if not accident_detected:
+            return
+
+        location = get_laptop_location()
+        email_sent, email_message = send_accident_alert_email(location=location)
+
+        self.latest_accident["location"] = location
+        if email_sent:
+            self.latest_accident["email_sent"] = True
+            print(f"[ALERT] Accident email sent. Location: {location.get('map_link', 'N/A')}")
+        else:
+            self.latest_accident["email_error"] = email_message
+            print(f"[WARN] Accident detected but email failed: {email_message}")
+
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict]:
         now = time.time()
         self._refresh_async_results()
@@ -241,6 +300,8 @@ class SmartDriverSafetyPipeline:
                 self.latest_drowsiness = self.drowsiness_detector.analyze(frame)
             except Exception as exc:
                 print(f"Drowsiness inference failed: {exc}")
+
+        self._handle_accident_detection(frame)
 
         annotated = frame.copy()
 
@@ -258,6 +319,7 @@ class SmartDriverSafetyPipeline:
             "age_faces": len(self.latest_age_results),
             "objects": len(self.latest_object_results),
             "age_labels": [det.get("age_label", "") for det in self.latest_age_results],
+            "accident": self.latest_accident,
         }
         return annotated, status
 
@@ -270,12 +332,17 @@ class SmartDriverSafetyPipeline:
 
 
 def draw_overlay(frame: np.ndarray, fps: float, status: Dict) -> np.ndarray:
-    cv2.rectangle(frame, (10, 10), (420, 120), (0, 0, 0), -1)
-    cv2.rectangle(frame, (10, 10), (420, 120), (40, 200, 40), 2)
+    cv2.rectangle(frame, (10, 10), (500, 160), (0, 0, 0), -1)
+    cv2.rectangle(frame, (10, 10), (500, 160), (40, 200, 40), 2)
 
     drowsy_text = "YES" if status.get("drowsy", False) else "NO"
     age_labels = status.get("age_labels", [])
     age_text = ", ".join(age_labels[:2]) if age_labels else "No face"
+    accident_data = status.get("accident", {})
+    accident_text = "YES" if accident_data.get("detected", False) else "NO"
+    email_text = "Sent" if accident_data.get("email_sent", False) else "Pending"
+    if accident_data.get("detected", False) and accident_data.get("email_error"):
+        email_text = "Failed"
 
     cv2.putText(
         frame,
@@ -314,6 +381,16 @@ def draw_overlay(frame: np.ndarray, fps: float, status: Dict) -> np.ndarray:
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
         (0, 165, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        f"Accident: {accident_text} | Email: {email_text}",
+        (20, 142),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (0, 0, 255) if accident_data.get("detected", False) else (180, 180, 180),
         2,
         cv2.LINE_AA,
     )

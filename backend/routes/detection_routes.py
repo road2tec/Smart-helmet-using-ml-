@@ -7,8 +7,12 @@ import copy
 import os
 from pathlib import Path
 from utils.db import db
+from utils.config import Config
+from utils.email_alert import send_accident_alert_email
+from utils.location_service import get_laptop_location
 
 # Hardware Simulation
+from hardware.accident_detection import AccidentDetector
 from hardware.alcohol_sensor import AlcoholSensor
 
 detection_bp = Blueprint('detection', __name__)
@@ -19,6 +23,7 @@ face_age_detector = None
 drowsiness_detector = None
 object_detector = None
 alcohol_sensor = AlcoholSensor()
+accident_detector = AccidentDetector(cooldown_sec=Config.ACCIDENT_ALERT_COOLDOWN_SEC)
 
 
 def ensure_detectors_initialized():
@@ -66,6 +71,13 @@ def _default_ai_state():
             'eyes_detected': 0,
         },
         'objects_detected': [],
+        'accident_status': {
+            'detected': False,
+            'email_sent': False,
+            'email_message': '',
+            'location': None,
+            'motion_score': 0.0,
+        },
         'age_group': 'N/A',
         'speed_limit': 'Standard',
     }
@@ -86,6 +98,19 @@ detector_init_attempted = {
     'object': False,
 }
 detector_init_errors = {}
+
+accident_state_lock = threading.Lock()
+last_accident_event = {
+    'active_until': 0.0,
+    'payload': {
+        'detected': False,
+        'email_sent': False,
+        'email_message': '',
+        'location': None,
+        'motion_score': 0.0,
+    },
+}
+ACCIDENT_LATCH_SEC = 8.0
 
 
 def _ensure_detector_instances():
@@ -180,6 +205,53 @@ def _compute_ai_state(frame):
     except Exception as exc:
         local_errors.append(f"Object detection failed: {exc}")
 
+    try:
+        active_labels = {'person', 'motorcycle', 'bicycle', 'car', 'bus', 'truck'}
+        has_activity = any(
+            str(det.get('label', '')).lower() in active_labels
+            for det in state.get('objects_detected', [])
+        )
+        now = time.time()
+        accident_detected = accident_detector.detect_accident(
+            frame=frame,
+            scene_active=has_activity,
+        )
+
+        current_payload = {
+            'detected': accident_detected,
+            'email_sent': False,
+            'email_message': '',
+            'location': None,
+            'motion_score': accident_detector.get_last_motion_score(),
+        }
+
+        if accident_detected:
+            location = get_laptop_location()
+            email_sent, email_message = send_accident_alert_email(location=location)
+            current_payload = {
+                'detected': True,
+                'email_sent': email_sent,
+                'email_message': email_message,
+                'location': location,
+                'motion_score': accident_detector.get_last_motion_score(),
+            }
+
+            with accident_state_lock:
+                last_accident_event['active_until'] = now + ACCIDENT_LATCH_SEC
+                last_accident_event['payload'] = current_payload
+
+        with accident_state_lock:
+            is_latched = now <= last_accident_event['active_until']
+            latched_payload = copy.deepcopy(last_accident_event['payload'])
+
+        if is_latched:
+            state['accident_status'] = latched_payload
+            state['accident_status']['detected'] = True
+        else:
+            state['accident_status'] = current_payload
+    except Exception as exc:
+        local_errors.append(f"Accident alert failed: {exc}")
+
     state['age_results'] = [
         {
             'age': r.get('age', 'N/A'),
@@ -228,6 +300,14 @@ def _parse_camera_indices():
 
 
 def _open_camera_device():
+    def is_usable_frame(frame):
+        if frame is None or frame.size == 0:
+            return False
+        # Reject dead/virtual camera feeds that return a fully black static frame.
+        if float(frame.mean()) <= 1.0 and float(frame.std()) <= 1.0:
+            return False
+        return True
+
     backend_entries = []
     if hasattr(cv2, "CAP_DSHOW"):
         backend_entries.append(("DSHOW", cv2.CAP_DSHOW))
@@ -254,7 +334,7 @@ def _open_camera_device():
             first_frame_ok = False
             for _ in range(30):
                 ok, frame = cap.read()
-                if ok and frame is not None and frame.size > 0:
+                if ok and is_usable_frame(frame):
                     first_frame_ok = True
                     break
                 time.sleep(0.04)
@@ -432,6 +512,8 @@ def get_status():
                 'alcohol_status': {'reading': 0, 'is_intoxicated': False, 'block_reason': ''},
                 'rider_info': {'age_results': [], 'age_group': 'N/A', 'speed_limit': 'Standard'},
                 'safety_status': {'is_drowsy': False, 'objects': []},
+                'accident_status': {'detected': False, 'email_sent': False, 'email_message': '', 'location': None, 'motion_score': 0.0},
+                'accident_detected': False,
                 'ignition': {'blocked': True, 'reasons': [camera_reason]}
             }), 200
 
@@ -457,6 +539,7 @@ def get_status():
         is_drowsy = bool(ai_snapshot.get('is_drowsy', False))
         drowsiness_debug = ai_snapshot.get('drowsiness_debug', {'ear': 0.0, 'eyes_closed_duration': 0.0, 'eyes_detected': 0})
         objects_detected = ai_snapshot.get('objects_detected', [])
+        accident_status = ai_snapshot.get('accident_status', {'detected': False, 'email_sent': False, 'email_message': '', 'location': None, 'motion_score': 0.0})
         age_group = ai_snapshot.get('age_group', 'N/A')
         speed_limit = ai_snapshot.get('speed_limit', 'Standard')
         ai_ready = ai_last_update_snapshot > 0
@@ -482,7 +565,8 @@ def get_status():
         status_data = {
             'success': True,
             'camera_active': True,
-            'camera_error': camera_error or ai_error_snapshot,
+            'camera_error': camera_error,
+            'ai_warning': ai_error_snapshot,
             'camera_index': active_camera_index,
             'ai_ready': ai_ready,
             'timestamp': datetime.datetime.utcnow().isoformat(),
@@ -505,6 +589,8 @@ def get_status():
                 'drowsiness_debug': drowsiness_debug,
                 'objects': objects_detected
             },
+            'accident_status': accident_status,
+            'accident_detected': bool(accident_status.get('detected', False)),
             'ignition': {
                 'blocked': start_blocked,
                 'reasons': block_reasons

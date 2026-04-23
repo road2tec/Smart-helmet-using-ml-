@@ -18,6 +18,8 @@ export default function Dashboard() {
     drowsy: false,
     alcohol_level: 0,
     accident_detected: false,
+    accident_email_sent: false,
+    accident_email_message: '',
     age_group: 'N/A',
     age_results: [],
     objects_detected: [],
@@ -28,7 +30,10 @@ export default function Dashboard() {
   });
   const [showNotification, setShowNotification] = useState(false);
   const [showDrowsyPopup, setShowDrowsyPopup] = useState(false);
+  const [showAccidentPopup, setShowAccidentPopup] = useState(false);
+  const [accidentPopupText, setAccidentPopupText] = useState('');
   const [lastHelmetState, setLastHelmetState] = useState(false);
+  const [lastAccidentState, setLastAccidentState] = useState(false);
   const [loading, setLoading] = useState(true);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -98,6 +103,9 @@ export default function Dashboard() {
           age_group: res.rider_info?.age_group || 'N/A',
           age_results: res.rider_info?.age_results || [],
           objects_detected: res.safety_status?.objects || [],
+          accident_detected: res.accident_detected || res.accident_status?.detected || false,
+          accident_email_sent: res.accident_status?.email_sent || false,
+          accident_email_message: res.accident_status?.email_message || '',
           drowsiness_debug: res.safety_status?.drowsiness_debug || { ear: 0, eyes_closed_duration: 0, eyes_detected: 0 },
           camera_error: res.camera_error || '',
           camera_index: res.camera_index ?? null,
@@ -123,6 +131,39 @@ export default function Dashboard() {
 
     return () => clearInterval(id);
   }, [cameraActive, authorized, data.drowsy]);
+
+  useEffect(() => {
+    if (!cameraActive || authorized) {
+      setShowAccidentPopup(false);
+      setLastAccidentState(data.accident_detected);
+      return;
+    }
+
+    if (data.accident_detected && data.accident_email_sent && !lastAccidentState) {
+      const message = 'Accident detected. Alert email has been sent successfully.';
+
+      setAccidentPopupText(message);
+      setShowAccidentPopup(true);
+
+      const popupTimer = setTimeout(() => {
+        setShowAccidentPopup(false);
+      }, 4200);
+
+      setLastAccidentState(true);
+      return () => clearTimeout(popupTimer);
+    }
+
+    if (!data.accident_detected || !data.accident_email_sent) {
+      setLastAccidentState(false);
+    }
+  }, [
+    cameraActive,
+    authorized,
+    data.accident_detected,
+    data.accident_email_sent,
+    data.accident_email_message,
+    lastAccidentState,
+  ]);
 
   useEffect(() => {
     if (!cameraActive || authorized) {
@@ -562,6 +603,23 @@ export default function Dashboard() {
                 <span className="mt-2 text-xs font-bold uppercase tracking-widest text-rose-100/90">
                   Eyes closed for {Number(data.drowsiness_debug?.eyes_closed_duration || 0).toFixed(1)}s
                 </span>
+              </div>
+            </motion.div>
+          )}
+
+          {showAccidentPopup && (
+            <motion.div
+              initial={{ opacity: 0, y: 30, scale: 0.94 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 30, scale: 0.94 }}
+              className="fixed top-8 left-1/2 -translate-x-1/2 z-[120] bg-amber-500 text-slate-950 px-7 py-5 rounded-2xl shadow-[0_20px_50px_rgba(245,158,11,0.45)] flex items-start space-x-4 border border-amber-200/80"
+            >
+              <div className="h-10 w-10 bg-black/10 rounded-xl flex items-center justify-center">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div className="flex flex-col max-w-[560px]">
+                <span className="text-[10px] font-black uppercase tracking-widest opacity-70 leading-none mb-1">Accident Alert</span>
+                <span className="text-base font-black font-outfit tracking-tight leading-snug">{accidentPopupText}</span>
               </div>
             </motion.div>
           )}

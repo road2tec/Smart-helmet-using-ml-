@@ -48,6 +48,22 @@ SMARTCORE is a high-performance, real-time safety monitoring system for motorcyc
    ```bash
    cd backend
    pip install -r requirements.txt
+   ```
+
+   Configure backend environment (`backend/.env`) before first run:
+   ```env
+   SECRET_KEY=change_this_secret_key
+   MONGO_URI=mongodb://localhost:27017/helmet_safety_db
+   EMAIL_USER=projectiot1406@gmail.com
+   EMAIL_PASS=your_gmail_app_password
+   ALERT_EMAIL_TO=pawankute240@gmail.com
+   SMTP_SERVER=smtp.gmail.com
+   SMTP_PORT=465
+   ACCIDENT_ALERT_COOLDOWN_SEC=120
+   ```
+
+   Start backend API:
+   ```bash
    python app.py
    ```
 
@@ -92,6 +108,7 @@ backend/main.py               # Unified threaded real-time integration pipeline
 - YOLO uses `backend/yolov8n.pt` if available, otherwise Ultralytics default loading is used.
 - Press `Q` in the webcam window to stop the pipeline.
 - If webcam fails to open, try another index using `--camera`.
+- Live pipeline now sends an accident email alert with laptop location when accident is detected.
 
 ---
 
