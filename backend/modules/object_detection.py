@@ -43,7 +43,7 @@ class ObjectDetection:
     def __init__(
         self,
         model_path: str = "yolov8n.pt",
-        conf_threshold: float = 0.35,
+        conf_threshold: float = 0.20,
         iou_threshold: float = 0.45,
         imgsz: int = 640,
         enable_speed_breaker_heuristic: bool = True,
@@ -81,7 +81,8 @@ class ObjectDetection:
             return "animal"
         if label in self.OBSTACLE_CLASSES:
             return "obstacle"
-        return None
+        # Keep additional YOLO classes as generic obstacles to improve practical detection coverage.
+        return "obstacle"
 
     def _detect_speed_breaker_heuristic(self, frame: np.ndarray) -> Optional[Dict]:
         """
@@ -133,7 +134,10 @@ class ObjectDetection:
                 'category': 'vehicle' | 'animal' | 'obstacle'
             }
         """
-        if frame is None or frame.size == 0 or self.model is None:
+        if frame is None or frame.size == 0:
+            return []
+
+        if self.model is None:
             return []
 
         detections: List[Dict] = []

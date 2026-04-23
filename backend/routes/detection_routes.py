@@ -98,6 +98,12 @@ detector_init_attempted = {
     'object': False,
 }
 detector_init_errors = {}
+detector_retry_after = {
+    'helmet': 0.0,
+    'age': 0.0,
+    'drowsiness': 0.0,
+    'object': 0.0,
+}
 
 accident_state_lock = threading.Lock()
 last_accident_event = {
@@ -117,6 +123,7 @@ def _ensure_detector_instances():
     global helmet_detector, face_age_detector, drowsiness_detector, object_detector
 
     backend_dir = Path(__file__).resolve().parents[1]
+    now = time.time()
 
     if not detector_init_attempted['helmet']:
         detector_init_attempted['helmet'] = True
@@ -147,15 +154,30 @@ def _ensure_detector_instances():
             detector_init_errors['drowsiness'] = str(exc)
 
     # YOLO object detection can be heavy; keep it optional for API responsiveness.
-    if os.getenv("ENABLE_OBJECT_DETECTION_API", "0") == "1" and not detector_init_attempted['object']:
+    object_enabled = os.getenv("ENABLE_OBJECT_DETECTION_API", "0") == "1"
+    should_try_object = (
+        object_enabled
+        and object_detector is None
+        and (
+            not detector_init_attempted['object']
+            or now >= detector_retry_after['object']
+        )
+    )
+
+    if should_try_object:
         detector_init_attempted['object'] = True
         try:
             from modules.object_detection import ObjectDetection
             yolo_path = backend_dir / "yolov8n.pt"
             object_detector = ObjectDetection(model_path=str(yolo_path))
-            detector_init_errors.pop('object', None)
+            if object_detector is not None and object_detector.model is not None:
+                detector_init_errors.pop('object', None)
+            else:
+                detector_init_errors['object'] = "Object detector model is unavailable"
+                detector_retry_after['object'] = now + 10.0
         except Exception as exc:
             detector_init_errors['object'] = str(exc)
+            detector_retry_after['object'] = now + 10.0
 
 
 def _compute_ai_state(frame):
