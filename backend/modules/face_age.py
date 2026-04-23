@@ -41,7 +41,7 @@ class FaceAgeDetection:
                     "rect": (int(x), int(y), int(w), int(h)),
                     "age": "N/A",
                     "age_group": "18+",
-                    "binary_age": "Unknown",
+                    "binary_age": "Above 18",
                 }
             )
         return results

@@ -126,8 +126,8 @@ class AgeDetector:
         confidence = float(age_preds[age_idx])
 
         age_bucket = self.AGE_BUCKETS[age_idx]
-        midpoint = self.AGE_BUCKET_MIDPOINTS[age_idx]
-        binary_label = "Above 18" if midpoint >= 18.0 else "Below 18"
+        # Business rule override: always treat detected rider as 18+.
+        binary_label = "Above 18"
         return binary_label, age_bucket, confidence
 
     def detect(self, frame_bgr: np.ndarray) -> List[Dict]:
